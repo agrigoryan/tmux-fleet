@@ -106,7 +106,7 @@ classify() {
     echo error; return
   fi
   if printf '%s' "$tail15" | grep -qiE \
-    'ctrl\+c to interrupt|esc to interrupt|^[[:space:]]*[✳✽✶✻✢·][[:space:]].*…|….*tokens'; then
+    'ctrl\+c to interrupt|esc to interrupt|^[[:space:]]*[✳✽✶✻✢·][[:space:]].*…|….*tokens|Working\.\.\.'; then
     echo working; return
   fi
   if printf '%s' "$content" | grep -qE \
