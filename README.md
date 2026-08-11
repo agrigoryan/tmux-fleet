@@ -29,8 +29,7 @@ wrapper. Detects Claude Code, Codex, Gemini, Aider, OpenCode, Cursor, and friend
 
 ## How detection works
 
-Three tiers, best available wins (see `docs/agent-session-monitoring/` in this repo for the
-full research):
+Three tiers, best available wins:
 
 1. **Claude Code supervisor API** — `claude agents --json` reports `busy|idle|waiting` per pid;
    joined to panes via pid → tty → `#{pane_tty}`. Exact, zero config. Cached 3s.
@@ -92,10 +91,3 @@ run-shell ~/devel/reachlabs/tmux-fleet/fleet.tmux
 - `scripts/fleet-picker.sh` — fzf popup UI
 - `scripts/fleet-menu.sh` — `display-menu` fallback (no fzf / old tmux)
 - `scripts/fleet-summary.sh` — status-line segment
-
-## Design notes / research
-
-Full write-ups in [`docs/agent-session-monitoring/`](../docs/agent-session-monitoring/):
-prior art (cmux, herdr, claude-squad), the tmux plugin ecosystem, Claude Code's external
-status signals (supervisor API, hooks, statusline, OSC titles), and verified tmux/fzf popup
-mechanics.
