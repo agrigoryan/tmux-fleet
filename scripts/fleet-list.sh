@@ -9,6 +9,9 @@
 #   1. `claude agents --json` supervisor API, joined pid -> tty -> #{pane_tty}
 #   2. process-on-pane-tty scan matching known agent CLI names
 #   3. capture-pane + pane-title heuristics for status when the API didn't answer
+#
+# Performance: everything is joined in single awk passes, all pane captures happen
+# in ONE tmux round trip, and the rendered list is cached for instant popup open.
 
 set -u
 
@@ -32,11 +35,14 @@ C_IDLE=$'\033[2;37m'   # dim
 C_DIM=$'\033[2m'
 
 TAB=$'\t'
+US=$'\x1f'   # unit separator: unlike \t it is not IFS-whitespace, so empty
+             # fields survive `read` (consecutive tabs would collapse)
 
 workdir="$(mktemp -d "${TMPDIR:-/tmp}/tmux-fleet.XXXXXX")"
 trap 'rm -rf "$workdir"' EXIT
 
-panes_f="$workdir/panes" ps_f="$workdir/ps" out_f="$workdir/out"
+panes_f="$workdir/panes" ps_f="$workdir/ps" agents_f="$workdir/agents"
+map_f="$workdir/agents_by_tty" out_f="$workdir/out" final_f="$workdir/final"
 api_cache="${TMPDIR:-/tmp}/tmux-fleet-api-$(id -u).tsv"
 
 # ---------------------------------------------------------------- snapshots --
@@ -45,19 +51,13 @@ tmux list-panes -a -F "#{pane_id}${TAB}#{pane_pid}${TAB}#{pane_tty}${TAB}#{sessi
 ps -eo pid=,tty=,command= >"$ps_f" 2>/dev/null
 
 # Supervisor API rows (tty_base \t status \t waiting_for \t name), cached API_TTL seconds
-api_fresh=0
-if [ -f "$api_cache" ]; then
-  now="$(date +%s)"
-  mtime="$(stat -f %m "$api_cache" 2>/dev/null || stat -c %Y "$api_cache" 2>/dev/null || echo 0)"
-  [ $((now - mtime)) -lt "$API_TTL" ] && api_fresh=1
-fi
-if [ "$api_fresh" = "0" ]; then
+if ! file_age_lt "$api_cache" "$API_TTL"; then
   : >"$api_cache.tmp"
   if command -v claude >/dev/null 2>&1 && command -v jq >/dev/null 2>&1; then
     claude agents --json 2>/dev/null |
       jq -r '.[]? | select(.kind == "interactive")
-             | [(.pid|tostring), .status, (.waitingFor // ""), (.name // "")] | @tsv' 2>/dev/null |
-      while IFS="$TAB" read -r apid astatus awaiting aname; do
+             | [(.pid|tostring), .status, (.waitingFor // ""), (.name // "")] | join("\u001f")' 2>/dev/null |
+      while IFS="$US" read -r apid astatus awaiting aname; do
         atty="$(awk -v p="$apid" '$1 == p { print $2; exit }' "$ps_f")"
         [ -n "$atty" ] && [ "$atty" != "??" ] &&
           printf '%s\t%s\t%s\t%s\n' "$atty" "$astatus" "$awaiting" "$aname"
@@ -65,6 +65,62 @@ if [ "$api_fresh" = "0" ]; then
   fi
   mv -f "$api_cache.tmp" "$api_cache"
 fi
+
+# tty -> agent-name map, one pass over ps
+awk -v re="[/ ]($AGENT_REGEX) " '
+  $2 != "??" && !($2 in seen) {
+    cmd = " "
+    for (i = 3; i <= NF; i++) cmd = cmd $i " "
+    if (match(cmd, re)) {
+      m = substr(cmd, RSTART + 1, RLENGTH - 2)   # drop boundary chars
+      sub(/.*\//, "", m)                         # basename
+      print $2 "\t" m
+      seen[$2] = 1
+    }
+  }' "$ps_f" >"$map_f"
+
+# join panes + API + process map -> agent pane rows (18 US-separated fields,
+# title last; US instead of \t so empty fields survive bash `read`)
+awk -F'\t' -v OFS="$US" -v af="$api_cache" -v mf="$map_f" '
+  FILENAME == af { api[$1] = $2 OFS $3 OFS $4; next }
+  FILENAME == mf { amap[$1] = $2; next }
+  {
+    tty = $3; sub(/^\/dev\//, "", tty)
+    agent = ""; astat = ""; await = ""; aname = ""
+    if (tty in api) {
+      agent = "claude"
+      split(api[tty], a, OFS); astat = a[1]; await = a[2]; aname = a[3]
+    } else if (tty in amap) {
+      agent = amap[tty]
+    }
+    if (agent == "") next
+    title = $0
+    for (i = 1; i < 14; i++) sub(/^[^\t]*\t/, "", title)
+    print $1, $2, tty, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,
+          agent, astat, await, aname, title
+  }' "$api_cache" "$map_f" "$panes_f" >"$agents_f"
+
+[ -s "$agents_f" ] || {
+  if [ "$MODE" != "--states" ]; then
+    printf '%b(no agent sessions found)%b\t\n' "$C_DIM" "$RESET" | tee "$final_f"
+    cp "$final_f" "$(fleet_cache_file).tmp" 2>/dev/null &&
+      mv -f "$(fleet_cache_file).tmp" "$(fleet_cache_file)"
+  fi
+  exit 0
+}
+
+# capture every agent pane in ONE tmux round trip, split into per-pane files
+cap_args=()
+while IFS="$US" read -r pane_id _; do
+  # sentinel carries the pane id without '%' — display-message expands % sequences
+  cap_args+=(display-message -p "@@FLEET@@${pane_id#%}" ";"
+             capture-pane -p -J -t "$pane_id" ";")
+done <"$agents_f"
+unset "cap_args[$((${#cap_args[@]} - 1))]"   # trailing ";"
+tmux "${cap_args[@]}" 2>/dev/null | tr "$NBSP" ' ' |
+  awk -v dir="$workdir" '
+    /^@@FLEET@@/ { f = dir "/cap_" substr($0, 10); next }
+    f { print > f }'
 
 hostname_l="$(hostname 2>/dev/null)"
 hostname_s="$(hostname -s 2>/dev/null)"
@@ -119,41 +175,20 @@ classify() {
 # --------------------------------------------------------------- main loop --
 pane_opt_updates=()
 
-while IFS="$TAB" read -r pane_id pane_pid pane_tty sess widx pidx activity \
+while IFS="$US" read -r pane_id pane_pid tty_base sess widx pidx activity \
                           pane_active window_active sess_attached cur_path \
-                          last_state prev_unseen title; do
-  tty_base="${pane_tty#/dev/}"
-  agent="" state="" waiting_for="" api_name="" content=""
+                          last_state prev_unseen agent api_status waiting_for \
+                          api_name title; do
+  content=""
+  [ -f "$workdir/cap_${pane_id#%}" ] && content="$(<"$workdir/cap_${pane_id#%}")"
 
-  # tier 1: supervisor API
-  api_row="$(grep -m1 "^$tty_base$TAB" "$api_cache" 2>/dev/null || true)"
-  if [ -n "$api_row" ]; then
-    agent="claude"
-    IFS="$TAB" read -r _ api_status waiting_for api_name <<<"$api_row"
-    case "$api_status" in
-      busy)    state=working ;;
-      waiting) state=waiting ;;
-      idle)    state=idle ;;
-    esac
-  fi
-
-  # tier 2: any agent process on this pane's tty
-  if [ -z "$agent" ]; then
-    match="$(awk -v t="$tty_base" '$2 == t' "$ps_f" |
-      grep -m1 -oE "(^|[/ ])($AGENT_REGEX)( |\$)" || true)"
-    if [ -n "$match" ]; then
-      match="${match# }"; match="${match% }"   # trim the boundary chars we captured
-      agent="${match##*/}"
-    fi
-  fi
-
-  [ -z "$agent" ] && continue
-
-  # tier 3: screen heuristics — only when the API didn't answer
-  if [ -z "$state" ]; then
-    content="$(tmux capture-pane -p -J -t "$pane_id" 2>/dev/null | tr "$NBSP" ' ')"
-    state="$(classify "$content" "$title")"
-  fi
+  state=""
+  case "$api_status" in
+    busy)    state=working ;;
+    waiting) state=waiting ;;
+    idle)    state=idle ;;
+  esac
+  [ -z "$state" ] && state="$(classify "$content" "$title")"
 
   # done/unseen tracking: flag panes that finished while you weren't looking
   visible=0
@@ -182,23 +217,15 @@ while IFS="$TAB" read -r pane_id pane_pid pane_tty sess widx pidx activity \
   case "$display_state" in
     waiting)
       msg="$waiting_for"
-      if [ -z "$msg" ]; then
-        [ -z "$content" ] && content="$(tmux capture-pane -p -J -t "$pane_id" 2>/dev/null | tr "$NBSP" ' ')"
-        msg="$(printf '%s\n' "$content" |
-          grep -E 'Do you want|Would you like|Do you trust|Allow this|Run this command' |
-          tail -1 | sed -E 's/[│╭╰─]+//g; s/^[[:space:]]+//; s/[[:space:]]+$//')"
-      fi
+      [ -z "$msg" ] && msg="$(printf '%s\n' "$content" |
+        grep -E 'Do you want|Would you like|Do you trust|Allow this|Run this command' |
+        tail -1 | sed -E 's/[│╭╰─]+//g; s/^[[:space:]]+//; s/[[:space:]]+$//')"
       ;;
     working)
-      [ -n "$content" ] && msg="$(spinner_line "$content")"
+      msg="$(spinner_line "$content")"
       ;;
   esac
   [ -z "$msg" ] && msg="$(clean_title "$title")"
-  if [ -z "$msg" ] && [ "$display_state" = "working" ] && [ -z "$content" ]; then
-    # API said busy but the title is generic — grab the live spinner line
-    content="$(tmux capture-pane -p -J -t "$pane_id" 2>/dev/null | tr "$NBSP" ' ')"
-    msg="$(spinner_line "$content")"
-  fi
   [ -z "$msg" ] && [ -n "$api_name" ] && msg="$api_name"
   msg="${msg//$TAB/ }"
   [ "${#msg}" -gt 80 ] && msg="${msg:0:79}…"
@@ -218,7 +245,7 @@ while IFS="$TAB" read -r pane_id pane_pid pane_tty sess widx pidx activity \
     "$C_DIM" "${dir:0:14}" "$RESET" "$msg"
 
   printf '%s\t%s\t%s\t%s\n' "$prio" "$activity" "$display" "$pane_id" >>"$out_f"
-done <"$panes_f"
+done <"$agents_f"
 
 # persist state transitions in one tmux invocation
 if [ "${#pane_opt_updates[@]}" -gt 0 ]; then
@@ -229,7 +256,14 @@ fi
 [ "$MODE" = "--states" ] && exit 0
 
 if [ -s "$out_f" ]; then
-  sort -t "$TAB" -k1,1n -k2,2nr "$out_f" | cut -f3-
+  sort -t "$TAB" -k1,1n -k2,2nr "$out_f" >"$final_f.sorted"
+  cut -f3- "$final_f.sorted" >"$final_f"
 else
-  printf '%b(no agent sessions found)%b\t\n' "$C_DIM" "$RESET"
+  printf '%b(no agent sessions found)%b\t\n' "$C_DIM" "$RESET" >"$final_f"
 fi
+
+cat "$final_f"
+
+# refresh the instant-open cache for the picker
+cache="$(fleet_cache_file)"
+cp "$final_f" "$cache.tmp" 2>/dev/null && mv -f "$cache.tmp" "$cache"

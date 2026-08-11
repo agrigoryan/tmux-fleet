@@ -41,7 +41,14 @@ if [ "$refresh_interval" != "0" ]; then
   fi
 fi
 
-selection="$("$LIST" | fzf "${fzf_args[@]}")" || exit 0
+# instant open: feed the last rendered list immediately, swap in fresh data
+cache="$(fleet_cache_file)"
+if [ -s "$cache" ] && file_age_lt "$cache" 600; then
+  fzf_args+=(--bind "start:reload($LIST)")
+  selection="$(fzf "${fzf_args[@]}" <"$cache")" || exit 0
+else
+  selection="$("$LIST" | fzf "${fzf_args[@]}")" || exit 0
+fi
 
 pane_id="${selection##*$'\t'}"
 [ -n "$pane_id" ] || exit 0
