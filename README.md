@@ -26,20 +26,41 @@ wrapper. Detects Claude Code, Codex, Gemini, Aider, OpenCode, Cursor, and friend
 | `done` (cyan) | finished working while you weren't looking (clears when you visit) |
 | `working` (green) | actively running |
 | `idle` (dim) | at the prompt, seen |
+| `unknown` (dim) | capture failed or the current UI has no reliable status signal |
 
 ## How detection works
 
-Three tiers, best available wins:
+One process snapshot identifies the foreground agent on each pane's tty, including agents
+whose tool children temporarily own the foreground. Executable and interpreter entrypoints
+are matched; filenames and arbitrary command arguments are not. Suspended/background jobs
+are excluded. PID **and process start time** distinguish replacement agents in the same pane.
 
-1. **Claude Code supervisor API** — `claude agents --json` reports `busy|idle|waiting` per pid;
-   joined to panes via pid → tty → `#{pane_tty}`. Exact, zero config. Cached 3s.
-2. **Process scan** — one `ps` pass matching agent CLI names against each pane's tty.
-3. **Screen + title heuristics** — battle-tested patterns from herdr/agent-deck: braille
-   spinner in the OSC pane title, `esc to interrupt` / `ctrl+c to interrupt`,
-   spinner+ellipsis+token lines, `Do you want to proceed?` dialogs, `❯` prompt.
+Status sources:
 
-The `done` state is tracked with tmux pane user options (`@fleet_last_state`,
-`@fleet_unseen`) — state lives in the tmux server and disappears with the pane.
+1. **Optional native events** — Pi and OpenCode adapters publish lifecycle and input events.
+   See [native adapter installation](integrations/README.md). No harness configuration is
+   changed automatically. Events require a matching foreground process identity; a 30s
+   lease prevents dead integrations from remaining authoritative.
+2. **Claude supervisor API** — `claude agents --json`, cached 3s, with PID/start validation.
+   Calls time out after 2s and failures back off for 30s. Current screen dialogs/errors
+   override cached API status; visible activity overrides a cached idle result.
+3. **Harness-specific screen/title classifiers** — Claude, Codex, Pi, and OpenCode each
+   have their own prompt, permission, progress, and error patterns. Includes Pi 0.85's
+   editor-border indicator and Codex's blinking `Action Required` titles. Other configured
+   agents use a conservative generic fallback. Missing cues mean `unknown`, not `idle`.
+
+A background collector polls every 2s even while the popup is closed. Unseen screen-based
+completion requires two idle observations at least a second apart. A visible idle prompt is
+acknowledged immediately. Missing/blank captures never imply
+completion. Native settled events can record complete turns between polls. Without native
+events, work that starts and finishes entirely between polls can still be missed; custom
+UIs/keybindings may require new screen fixtures.
+
+`done` is tracked in tmux pane options, bound to the current process/session identity. Focus
+hooks acknowledge visits even between scans; linked windows count as viewed if any attached
+session has the pane selected. Collector, native events, and focus updates share a lock.
+Caches use unique temporary files, atomic publication, and a per-server namespace. Restarting
+tmux cannot reuse the previous server's cache.
 
 ## Install
 
@@ -52,13 +73,14 @@ to `display-menu` without it). `jq` + Claude Code CLI enable the supervisor-API 
 set -g @plugin 'aram/tmux-fleet'
 ```
 
-**Direct** (from this monorepo), add to `~/.tmux.conf`:
+**Direct**, add the actual checkout path to `~/.tmux.conf`:
 
 ```tmux
-run-shell ~/devel/reachlabs/tmux-fleet/fleet.tmux
+run-shell ~/devel/oss/tmux-fleet/fleet.tmux
 ```
 
-then `tmux source ~/.tmux.conf`.
+then `tmux source ~/.tmux.conf`. Reload after upgrading to install the monitor and focus hooks.
+Repeated loading keeps one monitor per server and preserves unrelated hooks.
 
 ## Options
 
@@ -68,6 +90,7 @@ set -g @fleet-width '90%'              # popup width
 set -g @fleet-height '75%'             # popup height
 set -g @fleet-preview 'right,55%'      # fzf preview-window spec
 set -g @fleet-refresh-interval '2'     # seconds; 0 disables auto-refresh
+set -g @fleet-poll-interval '2'        # background tracking; 0 stops monitor
 set -g @fleet-api-cache-ttl '3'        # claude agents --json cache seconds
 set -g @fleet-process-pattern 'claude|codex|gemini|aider|opencode|cursor-agent|amp|goose|droid|copilot|grok|crush|pi'
 ```
@@ -79,7 +102,7 @@ line, and it becomes e.g. `⏳1 ✔2 ⚙3` (waiting / done-unseen / working coun
 
 ```tmux
 set -g status-right '#{fleet_status} | %H:%M'
-run-shell ~/devel/reachlabs/tmux-fleet/fleet.tmux
+run-shell ~/devel/oss/tmux-fleet/fleet.tmux
 ```
 
 (Or call `scripts/fleet-summary.sh` directly via `#()`.)
@@ -91,3 +114,24 @@ run-shell ~/devel/reachlabs/tmux-fleet/fleet.tmux
 - `scripts/fleet-picker.sh` — fzf popup UI
 - `scripts/fleet-menu.sh` — `display-menu` fallback (no fzf / old tmux)
 - `scripts/fleet-summary.sh` — status-line segment
+- `scripts/classify.sh` — per-harness screen/title classifiers
+- `scripts/process-map.awk` — executable matching and foreground ancestry
+- `scripts/state.sh` — completion transition logic
+- `scripts/fleet-monitor.sh` — background collector lifecycle
+- `scripts/fleet-event.sh` — native event and focus acknowledgement bridge
+- `integrations/` — optional Pi/OpenCode adapters and installation instructions
+
+## Verification
+
+With tmux and jq available, no package install is needed. Shell suites run on Bash 3.2+; native adapter tests require
+Node 22.18+ (built-in TypeScript stripping). The mock suites never access the user's tmux
+server or agent processes.
+
+```sh
+bash tests/run.sh
+bash tests/tmux-smoke.sh
+```
+
+The smoke test creates a dedicated temporary tmux server with a fake agent TUI, exercises
+real tty/process joins and native events, then removes that test server. It needs permission
+to create a local tmux socket and read the process table.

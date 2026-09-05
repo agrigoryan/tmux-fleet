@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+set -eu
+if [ "$*" = '+%s' ]; then cat "$FLEET_TEST_DATA/now"; else /bin/date "$@"; fi

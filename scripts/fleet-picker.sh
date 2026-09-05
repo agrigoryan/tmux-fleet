@@ -8,7 +8,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=helpers.sh
 source "$SCRIPT_DIR/helpers.sh"
 
-LIST="$SCRIPT_DIR/fleet-list.sh"
+LIST="$(fleet_shell_quote "$SCRIPT_DIR/fleet-list.sh")"
 
 command -v fzf >/dev/null 2>&1 || exec "$SCRIPT_DIR/fleet-menu.sh"
 
@@ -18,17 +18,18 @@ export SHELL=/bin/sh
 
 preview_window="$(get_tmux_option "@fleet-preview" "right,55%")"
 refresh_interval="$(get_tmux_option "@fleet-refresh-interval" "2")"
+[[ "$refresh_interval" =~ ^[0-9]+([.][0-9]+)?$ ]] || refresh_interval=2
 
 fzf_args=(
   --ansi --no-sort --layout=reverse --info=inline-right
   --delimiter $'\t' --with-nth 1
   --prompt 'agents ❯ '
   --header 'enter: jump · ctrl-r: refresh · ctrl-x: kill pane'
-  --preview 'tmux capture-pane -ep -t {2} 2>/dev/null | tail -n "${FZF_PREVIEW_LINES:-40}"'
+  --preview '[ -n {2} ] && tmux capture-pane -ep -t {2} 2>/dev/null | tail -n "${FZF_PREVIEW_LINES:-40}"'
   --preview-window "$preview_window"
   --bind "ctrl-r:reload($LIST)+refresh-preview"
   --bind 'focus:refresh-preview'
-  --bind "ctrl-x:execute-silent(tmux kill-pane -t {2})+reload(sleep 0.2; $LIST)"
+  --bind "ctrl-x:execute-silent([ -n {2} ] && tmux kill-pane -t {2})+reload(sleep 0.2; $LIST)"
 )
 
 if [ "$refresh_interval" != "0" ]; then
@@ -37,7 +38,7 @@ if [ "$refresh_interval" != "0" ]; then
   else
     # pre-0.73 timer: the load event re-fires after each reload completes,
     # so this self-chains into a refresh loop
-    fzf_args+=(--bind "load:reload-sync(sleep $refresh_interval; $LIST)")
+    fzf_args+=(--bind "load:refresh-preview+reload-sync(sleep $refresh_interval; $LIST)")
   fi
 fi
 
@@ -47,7 +48,7 @@ if [ -s "$cache" ] && file_age_lt "$cache" 600; then
   fzf_args+=(--bind "start:reload($LIST)")
   selection="$(fzf "${fzf_args[@]}" <"$cache")" || exit 0
 else
-  selection="$("$LIST" | fzf "${fzf_args[@]}")" || exit 0
+  selection="$("$SCRIPT_DIR/fleet-list.sh" | fzf "${fzf_args[@]}")" || exit 0
 fi
 
 pane_id="${selection##*$'\t'}"

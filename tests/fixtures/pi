@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# Fake TUI on a real tty; name intentionally exercises interpreter detection.
+printf '\033[2J\033[H── Working ─────────\n'
+while IFS= read -r command; do
+  case "$command" in
+    idle) printf '\033[2J\033[H───────────────────\n\n───────────────────\n' ;;
+    working) printf '\033[2J\033[H── Working ─────────\n' ;;
+    waiting) printf '\033[2J\033[HChoose an option\n↑↓ select  enter confirm  esc cancel\n' ;;
+  esac
+done

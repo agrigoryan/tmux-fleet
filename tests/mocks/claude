@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+set -eu
+[ "$*" = 'agents --json' ] || exit 2
+cat "$FLEET_TEST_DATA/api.json"

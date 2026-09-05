@@ -15,5 +15,6 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
     if (count["done"])    out = out "#[fg=cyan,bold]✔"   count["done"]    " "
     if (count["working"]) out = out "#[fg=green]⚙"       count["working"] " "
     if (count["idle"])    out = out "#[fg=colour244]●"   count["idle"]    " "
+    if (count["unknown"]) out = out "#[fg=colour244]?"   count["unknown"] " "
     if (out != "") printf "%s#[default]", out
   }'

@@ -1,0 +1,55 @@
+#!/usr/bin/env bash
+set -eu
+data="$FLEET_TEST_DATA"
+render() {
+  local pane="$1" format="$2" property value
+  while [[ "$format" == *'#{'*'}'* ]]; do
+    property="${format#*\#\{}"; property="${property%%\}*}"
+    value=""
+    [ ! -f "$data/$pane/$property" ] || value="$(<"$data/$pane/$property")"
+    format="${format//\#\{$property\}/$value}"
+  done
+  printf '%s\n' "$format"
+}
+command_part() {
+  local command="$1" pane="" format="" property="" value=""
+  shift
+  case "$command" in
+    show-option) [ "${2:-}" != @fleet-api-cache-ttl ] || printf '600\n' ;;
+    list-panes)
+      [ ! -f "$data/fail-list" ] || return 1
+      while [ "$#" -gt 0 ]; do
+        case "$1" in -F) format="$2"; shift ;; esac
+        shift
+      done
+      while IFS= read -r pane; do [ -z "$pane" ] || render "$pane" "$format"; done <"$data/panes"
+      ;;
+    display-message)
+      while [ "$#" -gt 0 ]; do
+        case "$1" in -p) ;; -t) pane="$2"; shift ;; *) format="$1" ;; esac
+        shift
+      done
+      if [ "$format" = '#{socket_path}:#{pid}' ]; then printf '%s/socket:123\n' "$data"
+      elif [ -n "$pane" ]; then render "$pane" "$format"
+      else printf '%s\n' "$format"; fi
+      ;;
+    capture-pane)
+      while [ "$#" -gt 0 ]; do [ "$1" != -t ] || { pane="$2"; shift; }; shift; done
+      [ -f "$data/$pane/content" ] || return 1
+      cat "$data/$pane/content"
+      ;;
+    set)
+      [ "$1" = -p ] && [ "$2" = -t ]
+      pane="$3" property="$4" value="${5:-}"
+      printf '%s' "$value" >"$data/$pane/$property"
+      ;;
+    *) printf 'unsupported mock tmux command: %s\n' "$command" >&2; return 2 ;;
+  esac
+}
+part=()
+while [ "$#" -gt 0 ]; do
+  if [ "$1" = ';' ]; then command_part "${part[@]}"; part=()
+  else part+=("$1"); fi
+  shift
+done
+[ "${#part[@]}" = 0 ] || command_part "${part[@]}"
