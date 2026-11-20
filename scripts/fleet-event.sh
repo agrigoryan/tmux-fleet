@@ -25,7 +25,7 @@ fi
 [ "$#" -ge 4 ] || exit 2
 agent="$1" pid="$2" session="$3" state="$4" reason="${5:-}"
 pane="${TMUX_PANE:-}"
-case "$agent" in pi|opencode|codex|claude) ;; *) exit 2 ;; esac
+case "$agent" in pi|opencode|codex|claude|agy) ;; *) exit 2 ;; esac
 case "$pid" in ''|*[!0-9]*) exit 2 ;; esac
 case "$pane" in %*) case "${pane#%}" in ''|*[!0-9]*) exit 2 ;; esac ;; *) exit 2 ;; esac
 case "$state" in working|waiting|idle|error|ended) ;; *) exit 2 ;; esac

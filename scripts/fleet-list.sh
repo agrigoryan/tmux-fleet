@@ -30,7 +30,7 @@ if ! fleet_lock_acquire "$runtime/lock"; then emit_cache; exit 1; fi
 locked=1
 
 TAB=$'\t' US=$'\x1f'
-AGENT_REGEX="$(get_tmux_option @fleet-process-pattern 'claude|codex|gemini|aider|opencode|cursor-agent|amp|goose|droid|copilot|grok|crush|pi')"
+AGENT_REGEX="$(get_tmux_option @fleet-process-pattern 'claude|codex|gemini|aider|opencode|cursor-agent|amp|goose|droid|copilot|grok|crush|pi|agy')"
 API_TTL="$(fleet_uint "$(get_tmux_option @fleet-api-cache-ttl 3)" 3)"
 panes_f="$workdir/panes" ps_f="$workdir/ps" agents_f="$workdir/agents"
 api_cache="$runtime/api" map_f="$workdir/map"

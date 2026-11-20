@@ -54,9 +54,11 @@ pane %1 ttys001 101 pi '── Working ─────────────�
 pane %2 ttys002 102 opencode 'esc interrupt'
 pane %3 ttys003 103 codex $'Question 1/1\n› 1. Yes\nEnter to submit answer'
 pane %4 ttys004 104 claude $'✳ Working…\nDo you want to proceed\n❯ Yes'
-check 'four harnesses and empty field joins' $'working\nworking\nwaiting\nwaiting' "$(scan)"
+pane %5 ttys005 105 agy $'⣟  Running command...\n─────────────────────────────\n>\n─────────────────────────────\nesc to cancel   auto · Gemini'
+check 'five harnesses and empty field joins' $'working\nworking\nwaiting\nwaiting\nworking' "$(scan)"
 display="$(/bin/bash "$ROOT/scripts/fleet-list.sh")"
 case "$display" in *session-1:1.0*project*) ;; *) check 'display pane metadata join' present "$display" ;; esac
+case "$display" in *agy*session-5:1.0*Running\ command...*) ;; *) check 'agy display row' present "$display" ;; esac
 
 fresh
 pane %1 ttys001 101 codex '• Working (3s • esc to interrupt)'

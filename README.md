@@ -15,7 +15,7 @@ activity, live preview — and jump to any of them with one keystroke.
 preview shows the live pane content.
 
 Works with agents started any way, in any pane — nothing needs to be launched through a
-wrapper. Detects Claude Code, Codex, Gemini, Aider, OpenCode, Cursor, and friends.
+wrapper. Detects Claude Code, Codex, Antigravity (`agy`), Gemini, Aider, OpenCode, Cursor, and friends.
 
 ## States
 
@@ -44,7 +44,7 @@ Status sources:
 2. **Claude supervisor API** — `claude agents --json`, cached 3s, with PID/start validation.
    Calls time out after 2s and failures back off for 30s. Current screen dialogs/errors
    override cached API status; visible activity overrides a cached idle result.
-3. **Harness-specific screen/title classifiers** — Claude, Codex, Pi, and OpenCode each
+3. **Harness-specific screen/title classifiers** — Claude, Codex, Antigravity (`agy`), Pi, and OpenCode each
    have their own prompt, permission, progress, and error patterns. Includes Pi 0.85's
    editor-border indicator and Codex's blinking `Action Required` titles. Other configured
    agents use a conservative generic fallback. Missing cues mean `unknown`, not `idle`.
@@ -92,7 +92,7 @@ set -g @fleet-preview 'right,55%'      # fzf preview-window spec
 set -g @fleet-refresh-interval '2'     # seconds; 0 disables auto-refresh
 set -g @fleet-poll-interval '2'        # background tracking; 0 stops monitor
 set -g @fleet-api-cache-ttl '3'        # claude agents --json cache seconds
-set -g @fleet-process-pattern 'claude|codex|gemini|aider|opencode|cursor-agent|amp|goose|droid|copilot|grok|crush|pi'
+set -g @fleet-process-pattern 'claude|codex|gemini|aider|opencode|cursor-agent|amp|goose|droid|copilot|grok|crush|pi|agy'
 ```
 
 ## Status-line summary

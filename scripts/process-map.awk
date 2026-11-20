@@ -44,7 +44,7 @@ function command_agent(    exe, i, arg) {
 }
 BEGIN {
     OFS = "\t"
-    if (re == "") re = "claude|codex|gemini|aider|opencode|cursor-agent|amp|goose|droid|copilot|grok|crush|pi"
+    if (re == "") re = "claude|codex|gemini|aider|opencode|cursor-agent|amp|goose|droid|copilot|grok|crush|pi|agy"
     if (api_file != "") {
         while ((getline api_line < api_file) > 0) {
             split(api_line, api_fields, "\t")

@@ -6,21 +6,21 @@ fleet_message() {
     case "$state" in
       working)
         message="$(printf '%s\n' "$content" | awk 'NF' | tail -20 |
-          grep -E 'Working|Retrying|[Cc]ompacting|[Ss]ummarizing branch|^[[:space:]]*[✳✽✶✻✢·].*…' | tail -1)"
+          grep -E 'Working|Retrying|[Cc]ompacting|[Ss]ummarizing branch|^[[:space:]]*[✳✽✶✻✢·].*…|^[[:space:]]*(⠋|⠙|⠹|⠸|⠼|⠴|⠦|⠧|⠇|⠏|⣾|⣽|⣻|⢿|⡿|⣟|⣯|⣷)[[:space:]].*(\.\.\.|…)' | tail -1)"
         ;;
       waiting)
         message="$(printf '%s\n' "$content" | awk 'NF' | tail -20 |
-          grep -iE 'Do you want|Would you like|Do you trust|Allow this|Run this command|Permission required|Question [0-9]+/' | tail -1)"
+          grep -iE 'Do you want|Would you like|Do you trust|Allow this|Allow access|Allow calling|Run this command|Approval Required|Permission required|Blocked ·|Waiting for (site |upload |download )?approval|Waiting for (you to sign in|authentication)|Question [0-9]+/' | tail -1)"
         ;;
     esac
   fi
   if [ -z "$message" ]; then
     message="$(printf '%s' "$title" | sed -E 's/^[⠀-⣿✳✻✽✶✢·[:space:]]+//')"
-    case "$message" in 'Claude Code'|'Codex'|'Gemini CLI') message="" ;; esac
+    case "$message" in 'Claude Code'|'Codex'|'Gemini CLI'|'agy'|'Antigravity') message="" ;; esac
   fi
   [ -n "$message" ] || message="$name"
   # UI rows use tabs as framing. No data field may introduce another column.
-  message="$(printf '%s' "$message" | tr '\001-\037\177' ' ')"
+  message="$(printf '%s' "$message" | tr '\001-\037\177' ' ' | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')"
   if [ "${#message}" -gt 80 ]; then message="${message:0:79}…"; fi
   printf '%s' "$message"
 }
